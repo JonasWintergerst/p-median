@@ -1,0 +1,220 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[margin=2.5cm]{geometry}
+
+\title{The $p$-Median Problem:\\ Model and Greedy Heuristic}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{The $p$-median model}
+
+We are given a set of $n$ demand points (hexes) and the same set is used as the
+set of candidate facility sites (medians). Let
+
+\begin{itemize}
+  \item $V = \{1, \dots, n\}$ be the set of hexes (both demands and candidate sites);
+  \item $d_{ij} \ge 0$ be the distance between hex $i$ and hex $j$;
+  \item $p$ be the number of facilities (open sites) to select.
+\end{itemize}
+
+In this implementation the distance is the Euclidean distance between hex grid
+locations,
+\[
+  d_{ij} = \sqrt{(x_i - x_j)^2 + (y_i - y_j)^2},
+\]
+where $(x_i, y_i)$ is the location of hex $i$.
+
+\subsection*{Decision variables}
+
+\[
+  x_{ij} \quad\text{the fraction of demand } i \text{ served by site } j,
+  \qquad i, j \in V.
+\]
+
+There is no separate facility-open variable. The role of $y_j$ is played by the
+\emph{diagonal} entry $x_{jj}$: a hex $j$ serves itself exactly when it is open,
+so $x_{jj}$ is the open indicator and is the only variable that must be integral,
+\[
+  x_{jj} \in \{0, 1\} \qquad j \in V,
+  \qquad\qquad
+  0 \le x_{ij} \le 1 \quad (i \ne j).
+\]
+The off-diagonal assignments $x_{ij}$ ($i \ne j$) stay continuous in $[0,1]$.
+Once the $p$ open sites are fixed by the binary diagonal, the remaining
+assignment problem is totally unimodular, so the continuous $x_{ij}$ take values
+in $\{0,1\}$ at the optimum anyway.
+
+\subsection*{Formulation}
+
+\begin{align}
+  \min_{x} \quad
+    & \sum_{i \in V} \sum_{j \in V} d_{ij}\, x_{ij}
+      \label{eq:obj}\\
+  \text{s.t.} \quad
+    & \sum_{j \in V} x_{ij} = 1
+      & \forall\, i \in V, \label{eq:assign}\\
+    & x_{ij} \le x_{jj}
+      & \forall\, i, j \in V, \label{eq:link}\\
+    & \sum_{j \in V} x_{jj} = p,
+      & \label{eq:count}\\
+    & x_{jj} \in \{0, 1\}
+      & \forall\, j \in V, \label{eq:bin}\\
+    & 0 \le x_{ij} \le 1
+      & \forall\, i \ne j. \label{eq:dom}
+\end{align}
+
+The objective~\eqref{eq:obj} minimises the total assignment distance.
+Constraint~\eqref{eq:assign} forces every hex to be fully assigned,
+\eqref{eq:link} allows a hex to be served by site $j$ only if $j$ is open
+(i.e.\ $x_{jj} = 1$), and \eqref{eq:count} opens exactly $p$ facilities.
+
+\subsection*{Weighted demand}
+
+Each hex carries a demand weight $w_h \ge 0$ (in the code, \texttt{Hex::weight},
+default $1$). The weighted $p$-median replaces the objective~\eqref{eq:obj} with
+\[
+  \min_{x} \quad \sum_{i \in V} \sum_{j \in V} w_i\, d_{ij}\, x_{ij},
+\]
+so that hexes with larger demand pull facilities closer. The weights also drive
+the workload-balancing repair pass below, where the \emph{load} of a district is
+the sum of the weights of the hexes assigned to it.
+
+\section{Greedy heuristic}
+
+The greedy heuristic builds the solution by repeatedly opening the candidate
+site that reduces the total assignment distance the most. Let $c_h$ be the
+distance from hex $h$ to its nearest currently open site; opening site $c$ would
+change the total cost to $\sum_{h \in V} \min(c_h, d_{hc})$.
+
+\begin{algorithm}[h]
+\caption{Greedy $p$-median (site selection)}
+\label{alg:greedy}
+\begin{algorithmic}[1]
+  \Require hexes $V$, distances $d$, facility count $p$
+  \Ensure set of open sites $S$
+  \State $c_h \gets \infty$ \textbf{ for all } $h \in V$
+      \Comment{cost of each hex to its nearest open site}
+  \State $S \gets \emptyset$
+  \For{$k \gets 1$ \textbf{ to } $p$}
+    \State $c^\star \gets \displaystyle\arg\min_{c \in V \setminus S}
+            \sum_{h \in V} \min\!\big(c_h,\, d_{hc}\big)$
+        \Comment{site giving the lowest total cost}
+    \State $S \gets S \cup \{c^\star\}$
+    \For{$h \in V$}
+      \State $c_h \gets \min(c_h,\, d_{h c^\star})$
+          \Comment{update nearest-site costs}
+    \EndFor
+  \EndFor
+  \State \Return $S$
+\end{algorithmic}
+\end{algorithm}
+
+Once the $p$ sites are chosen, each hex is assigned to its nearest open site:
+\[
+  \text{assign}(h) = \arg\min_{s \in S} d_{hs}, \qquad h \in V,
+\]
+and the objective is $\sum_{h \in V} d_{h,\,\text{assign}(h)}$.
+
+\begin{algorithm}[h]
+\caption{Nearest-site assignment}
+\label{alg:assign}
+\begin{algorithmic}[1]
+  \Require hexes $V$, distances $d$, open sites $S$
+  \Ensure assignment $a$
+  \For{$h \in V$}
+    \State $a_h \gets \displaystyle\arg\min_{s \in S} d_{hs}$
+  \EndFor
+  \State \Return $a$
+\end{algorithmic}
+\end{algorithm}
+
+The greedy solution may then be passed through optional repair passes
+(contiguity and workload balancing) before reporting the final objective.
+
+\section{Repair passes}
+
+The repair passes operate in \emph{district-index space}: $a_h \in \{1,\dots,p\}$
+is the index of the open site currently serving hex $h$. They rely on the hex
+adjacency graph $N(h)$, the set of grid neighbours of $h$ (the eight
+king-move offsets on the hex grid).
+
+\subsection*{Contiguity repair}
+
+A district should be a single connected region. For each district $s$, a
+breadth-first search from its open site $S_s$ marks every hex of $s$ reachable
+through neighbours that also belong to $s$. Any hex of $s$ that is \emph{not}
+reachable is ``stranded'' and is reassigned to a neighbouring district.
+
+\begin{algorithm}[h]
+\caption{Contiguity repair}
+\label{alg:contig}
+\begin{algorithmic}[1]
+  \Require assignment $a$, adjacency $N$, open sites $S$
+  \Ensure repaired assignment $a$
+  \For{$s \gets 1$ \textbf{ to } $p$}
+    \State $R \gets \textsc{Bfs}(S_s,\, N,\, a,\, s)$
+        \Comment{hexes of $s$ reachable from its site}
+    \For{$h \in V$ \textbf{ with } $a_h = s$ \textbf{ and } $h \notin R$}
+      \If{$\exists\, j \in N(h)$ \textbf{ with } $a_j \ne s$}
+        \State $a_h \gets a_j$
+            \Comment{move stranded hex to a neighbour's district}
+      \EndIf
+    \EndFor
+  \EndFor
+  \State \Return $a$
+\end{algorithmic}
+\end{algorithm}
+
+Here $\textsc{Bfs}(\text{start}, N, a, s)$ returns the set of hexes reachable
+from \emph{start} using only edges of $N$ whose endpoints satisfy $a_j = s$.
+
+\subsection*{Workload-balancing repair}
+
+This pass evens out district loads until the most loaded district is within a
+factor \texttt{limit} of the mean load. Let
+$\mathrm{load}(s) = \sum_{h : a_h = s} w_h$ and
+$\overline{\mathrm{load}} = \frac{1}{p}\sum_s \mathrm{load}(s)$. While the
+imbalance $\max_s \mathrm{load}(s) / \overline{\mathrm{load}}$ exceeds the limit,
+a single boundary hex is moved from the most loaded district to the least loaded
+one, provided the move keeps the donor district connected.
+
+\begin{algorithm}[h]
+\caption{Workload-balancing repair}
+\label{alg:workload}
+\begin{algorithmic}[1]
+  \Require assignment $a$, weights $w$, adjacency $N$, open sites $S$, ratio \textit{limit}
+  \Ensure repaired assignment $a$
+  \For{$\textit{iter} \gets 1$ \textbf{ to } $\textit{maxIter}$}
+    \State compute $\mathrm{load}(s)$ for all $s$, and mean $\overline{\mathrm{load}}$
+    \If{$\overline{\mathrm{load}} = 0$ \textbf{ or } $\max_s \mathrm{load}(s) / \overline{\mathrm{load}} \le \textit{limit}$}
+      \State \textbf{break}
+    \EndIf
+    \State $o \gets \arg\max_s \mathrm{load}(s)$;\quad $u \gets \arg\min_s \mathrm{load}(s)$
+    \If{$o = u$} \State \textbf{break} \EndIf
+    \State \textit{swapped} $\gets$ \textbf{false}
+    \For{$h \in V$ \textbf{ with } $a_h = o$ \textbf{ and } $h \ne S_o$}
+      \If{$\exists\, j \in N(h)$ \textbf{ with } $a_j = u$ \textbf{ and } \textsc{ConnectedWithout}$(a, N, S_o, h, o)$}
+        \State $a_h \gets u$;\quad \textit{swapped} $\gets$ \textbf{true};\quad \textbf{break}
+      \EndIf
+    \EndFor
+    \If{\textbf{not} \textit{swapped}} \State \textbf{break} \EndIf
+  \EndFor
+  \State \Return $a$
+\end{algorithmic}
+\end{algorithm}
+
+\textsc{ConnectedWithout}$(a, N, S_o, h, o)$ tests, via a BFS from the site
+$S_o$ that skips hex $h$, whether district $o$ would remain connected after $h$
+is removed (i.e.\ the BFS reaches all but one of the district's hexes). The loop
+also stops if no admissible move exists or after \textit{maxIter} iterations,
+guaranteeing termination.
+
+\end{document}

@@ -1,0 +1,9 @@
+/target
+
+# LaTeX build artifacts
+doc/*.pdf
+doc/*.aux
+doc/*.log
+doc/*.out
+doc/*.fls
+doc/*.fdb_latexmk
