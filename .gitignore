@@ -1,7 +1,9 @@
 /target
 
-# LaTeX build artifacts
+# LaTeX build artifacts. model.pdf ist bewusst getrackt: das Repo ist oeffentlich
+# und die Modellbeschreibung soll ohne LaTeX-Lauf lesbar sein.
 doc/*.pdf
+!doc/model.pdf
 doc/*.aux
 doc/*.log
 doc/*.out
